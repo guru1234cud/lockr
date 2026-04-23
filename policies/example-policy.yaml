@@ -1,0 +1,15 @@
+name: api-server
+description: "Policy for the main API backend service"
+
+rules:
+  - path: "secrets/kv/prod/api/*"
+    capabilities: [read]
+
+  - path: "secrets/kv/prod/db/*"
+    capabilities: [read]
+
+  - path: "secrets/transit/payments-key"
+    capabilities: [encrypt, decrypt]
+
+  - path: "secrets/db/postgres/main"
+    capabilities: [read]

@@ -1,0 +1,39 @@
+version: "3.9"
+
+services:
+  lockr:
+    build:
+      context: ..
+      dockerfile: deployments/Dockerfile
+    ports:
+      - "8300:8300"
+    volumes:
+      - lockr_data:/var/lib/lockr
+      - ./policies:/etc/lockr/policies
+      - ./config.yml:/etc/lockr/config.yml
+      - ./tls:/etc/lockr/tls
+    environment:
+      LOCKR_PASSPHRASE: ${LOCKR_PASSPHRASE}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "lockr", "status", "--addr", "https://localhost:8300"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # Example: your API service connecting to Lockr
+  # your-api:
+  #   image: your-api-image
+  #   depends_on:
+  #     lockr:
+  #       condition: service_healthy
+  #   volumes:
+  #     - ./certs/your-api.key:/certs/client.key:ro
+  #     - ./tls/ca.crt:/certs/ca.crt:ro
+  #   environment:
+  #     LOCKR_ADDR: "https://lockr:8300"
+  #     LOCKR_KEY: "/certs/client.key"
+  #     LOCKR_CA: "/certs/ca.crt"
+
+volumes:
+  lockr_data:

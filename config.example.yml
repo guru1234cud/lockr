@@ -1,0 +1,24 @@
+server:
+  addr: "0.0.0.0:8300"
+  tls_cert: "/etc/lockr/tls/server.crt"
+  tls_key: "/etc/lockr/tls/server.key"
+  tls_ca: "/etc/lockr/tls/ca.crt"       # for verifying client certs if needed
+
+storage:
+  data_dir: "/var/lib/lockr/data"
+  master_key_path: "/var/lib/lockr/master.key.enc"
+
+audit:
+  log_file: "/var/lib/lockr/audit.log"
+
+policy:
+  dir: "/etc/lockr/policies"
+
+dynamic_secrets:
+  credential_janitor_interval: "5m"
+
+session:
+  ttl: "1h"
+  max_ttl: "24h"
+
+log_level: "info"   # debug | info | warn | error
