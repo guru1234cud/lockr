@@ -1,0 +1,48 @@
+# Binary
+lockr
+
+# Master key and TLS certs (never commit these)
+*.key
+*.key.enc
+*.crt
+*.pem
+tls/
+
+# Config with secrets
+config.yml
+!config.example.yml
+
+# BadgerDB data
+data/
+*.vlog
+*.sst
+MANIFEST
+KEYREGISTRY
+LOCK
+
+# Audit log
+audit.log
+
+# Enrollment output
+certs/
+
+# Environment
+.env
+.env.*
+
+# Go build cache
+vendor/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temp
+/tmp/
+*.log
