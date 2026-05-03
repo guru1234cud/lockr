@@ -19,15 +19,37 @@ import (
 )
 
 type DBConfig struct {
-	Name              string        `json:"name"`
-	Host              string        `json:"host"`
-	Port              int           `json:"port"`
-	DBName            string        `json:"dbname"`
-	AdminUser         string        `json:"admin_user"`
-	AdminPassword     string        `json:"admin_password"` // stored encrypted
-	DefaultTTL        time.Duration `json:"default_ttl"`
-	MaxTTL            time.Duration `json:"max_ttl"`
-	CreationStatement string        `json:"creation_statement"`
+	Name              string `json:"name"`
+	Host              string `json:"host"`
+	Port              int    `json:"port"`
+	DBName            string `json:"dbname"`
+	AdminUser         string `json:"admin_user"`
+	AdminPassword     string `json:"admin_password"` // stored encrypted
+	DefaultTTLStr     string `json:"default_ttl"`    // human-readable e.g. "1h", "30m"
+	MaxTTLStr         string `json:"max_ttl"`        // human-readable e.g. "24h"
+	CreationStatement string `json:"creation_statement"`
+}
+
+func (c *DBConfig) defaultTTL() time.Duration {
+	if c.DefaultTTLStr == "" {
+		return time.Hour
+	}
+	d, err := time.ParseDuration(c.DefaultTTLStr)
+	if err != nil {
+		return time.Hour
+	}
+	return d
+}
+
+func (c *DBConfig) maxTTL() time.Duration {
+	if c.MaxTTLStr == "" {
+		return 24 * time.Hour
+	}
+	d, err := time.ParseDuration(c.MaxTTLStr)
+	if err != nil {
+		return 24 * time.Hour
+	}
+	return d
 }
 
 type DBLease struct {
@@ -98,25 +120,28 @@ func (s *DBStore) GenerateCreds(ctx context.Context, configName string) (*DBLeas
 	username := "lockr_" + randomHex(8)
 	password := randomHex(16)
 
-	stmt := cfg.CreationStatement
-	if stmt == "" {
-		stmt = fmt.Sprintf(
-			"CREATE USER %s WITH PASSWORD '%s'; GRANT CONNECT ON DATABASE %s TO %s;",
-			username, password, cfg.DBName, username,
-		)
+	// username is always "lockr_" + hex — safe to interpolate in identifier position.
+	// Password uses $1 parameter to avoid any injection risk.
+	var execErr error
+	if cfg.CreationStatement == "" {
+		_, execErr = db.ExecContext(ctx,
+			fmt.Sprintf("CREATE USER %s WITH PASSWORD $1", username), password)
+		if execErr == nil {
+			_, execErr = db.ExecContext(ctx,
+				fmt.Sprintf("GRANT CONNECT ON DATABASE %s TO %s", cfg.DBName, username))
+		}
 	} else {
-		// Replace template vars.
-		stmt = replaceAll(stmt, "{{username}}", username)
+		stmt := replaceAll(cfg.CreationStatement, "{{username}}", username)
 		stmt = replaceAll(stmt, "{{password}}", password)
+		_, execErr = db.ExecContext(ctx, stmt)
+	}
+	if execErr != nil {
+		return nil, fmt.Errorf("create postgres user: %w", execErr)
 	}
 
-	if _, err := db.ExecContext(ctx, stmt); err != nil {
-		return nil, fmt.Errorf("create postgres user: %w", err)
-	}
-
-	ttl := cfg.DefaultTTL
-	if ttl == 0 {
-		ttl = time.Hour
+	ttl := cfg.defaultTTL()
+	if ttl > cfg.maxTTL() {
+		ttl = cfg.maxTTL()
 	}
 
 	lease := &DBLease{
@@ -132,26 +157,143 @@ func (s *DBStore) GenerateCreds(ctx context.Context, configName string) (*DBLeas
 	if err != nil {
 		return nil, err
 	}
-	if err := s.db.SetWithTTL("secrets/db/leases/"+lease.LeaseID, data, ttl+time.Minute); err != nil {
+	leaseKey := "secrets/db/leases/" + lease.LeaseID
+	enc, err := s.crypto.Encrypt(leaseKey, data)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.db.SetWithTTL(leaseKey, enc, ttl+time.Minute); err != nil {
 		return nil, err
 	}
 	return lease, nil
 }
 
+// TestConnection verifies that the stored admin credentials can reach the database.
+func (s *DBStore) TestConnection(ctx context.Context, configName string) error {
+	cfg, err := s.loadConfig(configName)
+	if err != nil {
+		return err
+	}
+	connStr := fmt.Sprintf("host=%s port=%d dbname=%s user=%s password=%s sslmode=require",
+		cfg.Host, cfg.Port, cfg.DBName, cfg.AdminUser, cfg.AdminPassword)
+	db, err := sql.Open("postgres", connStr)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	return db.PingContext(ctx)
+}
+
+// ListLeases returns all active leases for a given DB config name.
+func (s *DBStore) ListLeases(configName string) ([]*DBLease, error) {
+	all, err := s.db.Scan("secrets/db/leases/")
+	if err != nil {
+		return nil, err
+	}
+	var result []*DBLease
+	now := time.Now().UTC()
+	for key, data := range all {
+		plain, err := s.crypto.Decrypt(key, data)
+		if err != nil {
+			continue
+		}
+		var lease DBLease
+		if err := json.Unmarshal(plain, &lease); err != nil {
+			continue
+		}
+		if lease.DBConfig != configName {
+			continue
+		}
+		if now.Before(lease.ExpiresAt) {
+			lease.Password = "[redacted]" // never expose password in listing
+			result = append(result, &lease)
+		}
+	}
+	return result, nil
+}
+
 // RevokeLease drops the Postgres user and removes the lease.
 func (s *DBStore) RevokeLease(ctx context.Context, leaseID string) error {
-	data, err := s.db.Get("secrets/db/leases/" + leaseID)
+	leaseKey := "secrets/db/leases/" + leaseID
+	data, err := s.db.Get(leaseKey)
 	if err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
 			return fmt.Errorf("lease %q not found", leaseID)
 		}
 		return err
 	}
+	plain, err := s.crypto.Decrypt(leaseKey, data)
+	if err != nil {
+		return err
+	}
 	var lease DBLease
-	if err := json.Unmarshal(data, &lease); err != nil {
+	if err := json.Unmarshal(plain, &lease); err != nil {
 		return err
 	}
 	return s.dropUser(ctx, lease.DBConfig, lease.Username, leaseID)
+}
+
+// ReconcileOrphans connects to each configured DB and drops any lockr_ users
+// that have no active lease. Call this once on server startup.
+func (s *DBStore) ReconcileOrphans(ctx context.Context) error {
+	configs, err := s.db.List("secrets/db/")
+	if err != nil {
+		return err
+	}
+
+	// Build set of active usernames from leases.
+	activeUsers := make(map[string]bool)
+	leases, _ := s.db.Scan("secrets/db/leases/")
+	for key, data := range leases {
+		plain, err := s.crypto.Decrypt(key, data)
+		if err != nil {
+			continue
+		}
+		var lease DBLease
+		if err := json.Unmarshal(plain, &lease); err != nil {
+			continue
+		}
+		if time.Now().UTC().Before(lease.ExpiresAt) {
+			activeUsers[lease.Username] = true
+		}
+	}
+
+	for _, cfgKey := range configs {
+		// Skip lease keys.
+		if len(cfgKey) > len("secrets/db/leases/") &&
+			cfgKey[:len("secrets/db/leases/")] == "secrets/db/leases/" {
+			continue
+		}
+		name := cfgKey[len("secrets/db/"):]
+		cfg, err := s.loadConfig(name)
+		if err != nil {
+			continue
+		}
+		connStr := fmt.Sprintf("host=%s port=%d dbname=%s user=%s password=%s sslmode=require",
+			cfg.Host, cfg.Port, cfg.DBName, cfg.AdminUser, cfg.AdminPassword)
+		db, err := sql.Open("postgres", connStr)
+		if err != nil {
+			continue
+		}
+		rows, err := db.QueryContext(ctx,
+			"SELECT usename FROM pg_catalog.pg_user WHERE usename LIKE 'lockr_%'")
+		if err != nil {
+			db.Close()
+			continue
+		}
+		for rows.Next() {
+			var uname string
+			if err := rows.Scan(&uname); err != nil {
+				continue
+			}
+			if !activeUsers[uname] {
+				_, _ = db.ExecContext(ctx, fmt.Sprintf("DROP USER IF EXISTS %s", uname))
+			}
+		}
+		rows.Close()
+		db.Close()
+	}
+	return nil
 }
 
 // RunJanitor sweeps expired leases and drops the corresponding Postgres users.
@@ -161,9 +303,13 @@ func (s *DBStore) RunJanitor(ctx context.Context) error {
 		return err
 	}
 	now := time.Now().UTC()
-	for _, data := range leases {
+	for key, data := range leases {
+		plain, err := s.crypto.Decrypt(key, data)
+		if err != nil {
+			continue
+		}
 		var lease DBLease
-		if err := json.Unmarshal(data, &lease); err != nil {
+		if err := json.Unmarshal(plain, &lease); err != nil {
 			continue
 		}
 		if now.After(lease.ExpiresAt) {

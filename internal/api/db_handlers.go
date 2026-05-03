@@ -71,6 +71,25 @@ func (s *Server) handleDBRevokeLease(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, r, http.StatusOK, map[string]string{"status": "revoked"})
 }
 
+func (s *Server) handleDBTestConfig(w http.ResponseWriter, r *http.Request) {
+	name := dbName(r.URL.Path)
+	if err := s.dbStore.TestConnection(r.Context(), name); err != nil {
+		writeErrorWithReqID(w, r, http.StatusBadGateway, "connection failed: "+err.Error())
+		return
+	}
+	writeJSON(w, r, http.StatusOK, map[string]string{"status": "ok", "message": "connection successful"})
+}
+
+func (s *Server) handleDBListLeases(w http.ResponseWriter, r *http.Request) {
+	name := dbName(r.URL.Path)
+	leases, err := s.dbStore.ListLeases(name)
+	if err != nil {
+		writeErrorWithReqID(w, r, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, r, http.StatusOK, map[string]any{"leases": leases, "count": len(leases)})
+}
+
 func dbName(urlPath string) string {
 	path := strings.TrimPrefix(urlPath, "/v1/secrets/db/")
 	return strings.SplitN(path, "/", 2)[0]

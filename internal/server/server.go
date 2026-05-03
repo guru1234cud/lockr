@@ -93,6 +93,15 @@ func (s *Server) Run(devMode bool) error {
 	dbStore := secrets.NewDBStore(db, crypto)
 	transitStore := secrets.NewTransitStore(db, crypto)
 
+	// On startup, drop any orphaned Postgres users from a previous crash/downtime.
+	if !devMode {
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			defer cancel()
+			_ = dbStore.ReconcileOrphans(ctx)
+		}()
+	}
+
 	// HTTP API.
 	apiServer := api.New(api.Config{
 		Cfg:          s.cfg,

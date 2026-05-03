@@ -41,12 +41,16 @@ func (s *Server) routes() http.Handler {
 		switch {
 		case hasSuffix(path, "/creds") && r.Method == http.MethodPost:
 			s.handleDBGenCreds(w, r)
+		case hasSuffix(path, "/creds") && r.Method == http.MethodGet:
+			s.handleDBListLeases(w, r)
 		case hasSuffix3(path, "/creds/") && r.Method == http.MethodDelete:
 			s.handleDBRevokeLease(w, r)
 		case hasSuffix(path, "/config") && r.Method == http.MethodGet:
 			s.handleDBGetConfig(w, r)
 		case hasSuffix(path, "/config") && r.Method == http.MethodPut:
 			s.handleDBPutConfig(w, r)
+		case hasSuffix(path, "/test") && r.Method == http.MethodPost:
+			s.handleDBTestConfig(w, r)
 		default:
 			writeError(w, http.StatusNotFound, "not found")
 		}
