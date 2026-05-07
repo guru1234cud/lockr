@@ -46,6 +46,13 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 
 		token := extractToken(r)
 		if token == "" {
+			if s.allowFirstAdminBootstrap(r) {
+				ctx := context.WithValue(r.Context(), ctxIdentity, "bootstrap")
+				ctx = context.WithValue(ctx, ctxAuthMethod, "admin_token")
+				ctx = context.WithValue(ctx, ctxPolicy, "root")
+				next.ServeHTTP(w, r.WithContext(ctx))
+				return
+			}
 			writeError(w, http.StatusUnauthorized, "missing authorization token")
 			return
 		}
@@ -80,6 +87,14 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 
 		writeError(w, http.StatusUnauthorized, "unrecognized token format")
 	})
+}
+
+func (s *Server) allowFirstAdminBootstrap(r *http.Request) bool {
+	if r.Method != http.MethodPost || r.URL.Path != "/v1/sys/admin/create" {
+		return false
+	}
+	hasAdmins, err := s.adminAuth.HasAdmins()
+	return err == nil && !hasAdmins
 }
 
 func (s *Server) requireAdmin(next http.Handler) http.Handler {

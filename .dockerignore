@@ -1,0 +1,43 @@
+.git
+.gitignore
+.dockerignore
+
+# Local build outputs
+lockr
+*.test
+coverage.out
+
+# Runtime data and secrets
+data/
+certs/
+tls/
+deployments/tls/
+deployments/config.yml
+deployments/.env
+deployments/policies/
+*.key
+*.key.enc
+*.crt
+*.pem
+audit.log
+config.yml
+.env
+.env.*
+
+# BadgerDB files
+*.vlog
+*.sst
+MANIFEST
+KEYREGISTRY
+LOCK
+
+# Editor/OS noise
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Local tool state
+.codex

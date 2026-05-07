@@ -31,11 +31,12 @@ var (
 	devMode bool
 
 	// Shared flags for client commands.
-	serverAddr  string
-	keyPath     string
-	caPath      string
-	adminToken  string
-	outputFmt   string
+	serverAddr string
+	keyPath    string
+	serviceID  string
+	caPath     string
+	adminToken string
+	outputFmt  string
 )
 
 func main() {
@@ -47,6 +48,7 @@ func main() {
 	// Global flags.
 	root.PersistentFlags().StringVar(&serverAddr, "addr", envOr("LOCKR_ADDR", "https://localhost:8300"), "Lockr server address")
 	root.PersistentFlags().StringVar(&keyPath, "key", envOr("LOCKR_KEY", ""), "Path to Ed25519 private key")
+	root.PersistentFlags().StringVar(&serviceID, "identity", envOr("LOCKR_SERVICE", ""), "Service identity for Ed25519 authentication")
 	root.PersistentFlags().StringVar(&caPath, "ca", envOr("LOCKR_CA", ""), "Path to CA certificate")
 	root.PersistentFlags().StringVar(&adminToken, "token", envOr("LOCKR_TOKEN", ""), "Admin token")
 	root.PersistentFlags().StringVar(&outputFmt, "output", "text", "Output format: text|json")
@@ -110,17 +112,18 @@ func initCmd() *cobra.Command {
 }
 
 func runInit(dataDir string) error {
-	// Create directories.
-	dirs := []string{
+	for _, d := range []string{
 		dataDir,
 		filepath.Join(dataDir, "data"),
-		"/etc/lockr/tls",
-		"/etc/lockr/policies",
-	}
-	for _, d := range dirs {
+	} {
 		if err := os.MkdirAll(d, 0700); err != nil {
-			// Non-fatal if directory exists.
-			_ = err
+			return fmt.Errorf("create data directory %s: %w", d, err)
+		}
+	}
+
+	for _, d := range []string{"/etc/lockr/tls", "/etc/lockr/policies"} {
+		if err := os.MkdirAll(d, 0700); err != nil {
+			fmt.Printf("Warning: could not create %s: %v\n", d, err)
 		}
 	}
 
@@ -247,7 +250,10 @@ func getCmd() *cobra.Command {
 		Short: "Read a secret",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client := newServiceClient()
+			client, err := newServiceClient()
+			if err != nil {
+				return err
+			}
 			url := "/v1/secrets/kv/" + args[0]
 			if version > 0 {
 				url += "?version=" + strconv.Itoa(version)
@@ -285,7 +291,10 @@ func setCmd() *cobra.Command {
 			if err := json.Unmarshal([]byte(args[1]), &value); err != nil {
 				return fmt.Errorf("value must be valid JSON: %w", err)
 			}
-			client := newServiceClient()
+			client, err := newServiceClient()
+			if err != nil {
+				return err
+			}
 			resp, err := client.put("/v1/secrets/kv/"+args[0], value)
 			if err != nil {
 				return err
@@ -303,7 +312,10 @@ func deleteCmd() *cobra.Command {
 		Short: "Soft-delete a secret",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client := newServiceClient()
+			client, err := newServiceClient()
+			if err != nil {
+				return err
+			}
 			resp, err := client.del("/v1/secrets/kv/" + args[0])
 			if err != nil {
 				return err
@@ -324,7 +336,10 @@ func listCmd() *cobra.Command {
 			if len(path) == 0 || path[len(path)-1] != '/' {
 				path += "/"
 			}
-			client := newServiceClient()
+			client, err := newServiceClient()
+			if err != nil {
+				return err
+			}
 			resp, err := client.get("/v1/secrets/kv/" + path)
 			if err != nil {
 				return err
@@ -355,7 +370,7 @@ func adminCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "admin", Short: "Manage admin tokens"}
 
 	create := &cobra.Command{
-		Use:  "create",
+		Use:   "create",
 		Short: "Create an admin token",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name, _ := cmd.Flags().GetString("name")
@@ -372,7 +387,7 @@ func adminCmd() *cobra.Command {
 	create.MarkFlagRequired("name")
 
 	revoke := &cobra.Command{
-		Use:  "revoke",
+		Use:   "revoke",
 		Short: "Revoke an admin token",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name, _ := cmd.Flags().GetString("name")
@@ -436,7 +451,10 @@ func transitCmd() *cobra.Command {
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			plaintext, _ := cmd.Flags().GetString("plaintext")
-			client := newServiceClient()
+			client, err := newServiceClient()
+			if err != nil {
+				return err
+			}
 			resp, err := client.post("/v1/secrets/transit/"+args[0]+"/encrypt", map[string]string{"plaintext": plaintext})
 			if err != nil {
 				return err
@@ -452,7 +470,10 @@ func transitCmd() *cobra.Command {
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ct, _ := cmd.Flags().GetString("ciphertext")
-			client := newServiceClient()
+			client, err := newServiceClient()
+			if err != nil {
+				return err
+			}
 			resp, err := client.post("/v1/secrets/transit/"+args[0]+"/decrypt", map[string]string{"ciphertext": ct})
 			if err != nil {
 				return err
@@ -467,7 +488,10 @@ func transitCmd() *cobra.Command {
 		Use:  "rotate <keyname>",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client := newServiceClient()
+			client, err := newServiceClient()
+			if err != nil {
+				return err
+			}
 			resp, err := client.post("/v1/secrets/transit/"+args[0]+"/rotate", nil)
 			if err != nil {
 				return err
@@ -485,8 +509,8 @@ func dbCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "db", Short: "Database dynamic credentials"}
 
 	configCmd := &cobra.Command{
-		Use:  "config <name>",
-		Args: cobra.ExactArgs(1),
+		Use:   "config <name>",
+		Args:  cobra.ExactArgs(1),
 		Short: "Configure a DB dynamic credential role",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client := newAdminClient()
@@ -500,11 +524,14 @@ func dbCmd() *cobra.Command {
 	}
 
 	credsCmd := &cobra.Command{
-		Use:  "creds <name>",
-		Args: cobra.ExactArgs(1),
+		Use:   "creds <name>",
+		Args:  cobra.ExactArgs(1),
 		Short: "Request dynamic DB credentials",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client := newServiceClient()
+			client, err := newServiceClient()
+			if err != nil {
+				return err
+			}
 			resp, err := client.post("/v1/secrets/db/"+args[0]+"/creds", nil)
 			if err != nil {
 				return err
@@ -523,7 +550,10 @@ func debugCmd() *cobra.Command {
 		Use:   "debug",
 		Short: "Debug current identity and policy",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			client := newServiceClient()
+			client, err := newServiceClient()
+			if err != nil {
+				return err
+			}
 			resp, err := client.get("/v1/auth/whoami")
 			if err != nil {
 				return err
@@ -704,17 +734,32 @@ func newAdminClient() *lockrClient {
 	return &lockrClient{addr: serverAddr, token: adminToken, tlsConfig: buildTLSConfig()}
 }
 
-func newServiceClient() *lockrClient {
-	return &lockrClient{addr: serverAddr, token: adminToken, tlsConfig: buildTLSConfig()}
+func newServiceClient() (*lockrClient, error) {
+	client := &lockrClient{addr: serverAddr, token: adminToken, tlsConfig: buildTLSConfig()}
+	if client.token != "" {
+		return client, nil
+	}
+	if keyPath == "" {
+		return nil, fmt.Errorf("service commands require --key/LOCKR_KEY or --token/LOCKR_TOKEN")
+	}
+	if serviceID == "" {
+		return nil, fmt.Errorf("service commands require --identity/LOCKR_SERVICE when using --key")
+	}
+	if err := client.authenticateEd25519(serviceID, keyPath); err != nil {
+		return nil, err
+	}
+	return client, nil
 }
 
 func buildTLSConfig() *tls.Config {
 	if caPath == "" {
-		return &tls.Config{InsecureSkipVerify: true}
+		fmt.Fprintln(os.Stderr, "Warning: --ca not provided; TLS certificate verification is disabled. Use --ca or LOCKR_CA in production.")
+		return &tls.Config{InsecureSkipVerify: true} //nolint:gosec
 	}
 	caPEM, err := os.ReadFile(caPath)
 	if err != nil {
-		return &tls.Config{InsecureSkipVerify: true}
+		fmt.Fprintf(os.Stderr, "Warning: could not read CA file %s (%v); TLS certificate verification is disabled.\n", caPath, err)
+		return &tls.Config{InsecureSkipVerify: true} //nolint:gosec
 	}
 	pool := x509.NewCertPool()
 	pool.AppendCertsFromPEM(caPEM)
@@ -735,6 +780,64 @@ func (c *lockrClient) put(path string, body any) (map[string]any, error) {
 
 func (c *lockrClient) del(path string) (map[string]any, error) {
 	return c.do("DELETE", path, nil)
+}
+
+func (c *lockrClient) authenticateEd25519(identity, keyPath string) error {
+	keyData, err := os.ReadFile(keyPath)
+	if err != nil {
+		return fmt.Errorf("read private key: %w", err)
+	}
+	keyBytes, err := hex.DecodeString(string(bytes.TrimSpace(keyData)))
+	if err != nil {
+		return fmt.Errorf("decode private key: %w", err)
+	}
+	if len(keyBytes) != ed25519.PrivateKeySize {
+		return fmt.Errorf("invalid Ed25519 private key length %d, want %d", len(keyBytes), ed25519.PrivateKeySize)
+	}
+	priv := ed25519.PrivateKey(keyBytes)
+
+	challengeResp, err := c.post("/v1/auth/challenge", map[string]string{"service": identity})
+	if err != nil {
+		return fmt.Errorf("request challenge: %w", err)
+	}
+	challengeHex, err := responseDataString(challengeResp, "challenge")
+	if err != nil {
+		return fmt.Errorf("read challenge response: %w", err)
+	}
+	challenge, err := hex.DecodeString(challengeHex)
+	if err != nil {
+		return fmt.Errorf("decode challenge: %w", err)
+	}
+
+	signature := ed25519.Sign(priv, challenge)
+	verifyResp, err := c.post("/v1/auth/verify", map[string]string{
+		"challenge": challengeHex,
+		"signature": hex.EncodeToString(signature),
+	})
+	if err != nil {
+		return fmt.Errorf("verify challenge: %w", err)
+	}
+	token, err := responseDataString(verifyResp, "token")
+	if err != nil {
+		return fmt.Errorf("read verify response: %w", err)
+	}
+	c.token = token
+	return nil
+}
+
+func responseDataString(resp map[string]any, field string) (string, error) {
+	if errMsg, ok := resp["error"].(string); ok && errMsg != "" {
+		return "", fmt.Errorf("%s", errMsg)
+	}
+	data, ok := resp["data"].(map[string]any)
+	if !ok {
+		return "", fmt.Errorf("missing data object")
+	}
+	value, ok := data[field].(string)
+	if !ok || value == "" {
+		return "", fmt.Errorf("missing data.%s", field)
+	}
+	return value, nil
 }
 
 func (c *lockrClient) do(method, path string, body any) (map[string]any, error) {

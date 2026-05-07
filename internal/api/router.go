@@ -5,16 +5,6 @@ import (
 )
 
 func (s *Server) routes() http.Handler {
-	mux := http.NewServeMux()
-
-	// Unauthenticated.
-	mux.HandleFunc("/v1/sys/health", s.handleHealth)
-	mux.HandleFunc("/v1/auth/challenge", s.handleChallenge)
-	mux.HandleFunc("/v1/auth/verify", s.handleVerify)
-	mux.HandleFunc("/v1/auth/totp", s.handleTOTPLogin)
-	mux.HandleFunc("/v1/auth/admin/login", s.handleAdminLogin)
-
-	// Authenticated routes wrapped via middleware chain.
 	authed := http.NewServeMux()
 
 	// Auth management.
@@ -48,7 +38,7 @@ func (s *Server) routes() http.Handler {
 		case hasSuffix(path, "/config") && r.Method == http.MethodGet:
 			s.handleDBGetConfig(w, r)
 		case hasSuffix(path, "/config") && r.Method == http.MethodPut:
-			s.handleDBPutConfig(w, r)
+			s.withAdmin(s.handleDBPutConfig)(w, r)
 		case hasSuffix(path, "/test") && r.Method == http.MethodPost:
 			s.handleDBTestConfig(w, r)
 		default:
@@ -61,7 +51,7 @@ func (s *Server) routes() http.Handler {
 		path := r.URL.Path
 		switch {
 		case hasSuffix(path, "/create"):
-			s.handleTransitCreate(w, r)
+			s.withAdmin(s.handleTransitCreate)(w, r)
 		case hasSuffix(path, "/encrypt"):
 			s.handleTransitEncrypt(w, r)
 		case hasSuffix(path, "/decrypt"):
@@ -84,19 +74,19 @@ func (s *Server) routes() http.Handler {
 	authed.HandleFunc("/v1/sys/admin/", s.withAdmin(s.handleAdminDelete))
 	authed.HandleFunc("/v1/sys/policy/reload", s.withAdmin(s.handlePolicyReload))
 
-	// Chain middleware: public routes pass through; authenticated routes go through auth.
+	mux := http.NewServeMux()
+
+	// Unauthenticated routes — registered before the catch-all so they take priority.
+	mux.HandleFunc("/v1/sys/health", s.handleHealth)
+	mux.HandleFunc("/v1/auth/challenge", s.handleChallenge)
+	mux.HandleFunc("/v1/auth/verify", s.handleVerify)
+	mux.HandleFunc("/v1/auth/totp", s.handleTOTPLogin)
+	mux.HandleFunc("/v1/auth/admin/login", s.handleAdminLogin)
+
+	// All other /v1/ routes require authentication and are audited.
 	mux.Handle("/v1/", s.auditMiddleware(s.authMiddleware(authed)))
 
-	// Re-register unauthenticated routes AFTER so they override the catch-all above.
-	finalMux := http.NewServeMux()
-	finalMux.HandleFunc("/v1/sys/health", s.handleHealth)
-	finalMux.HandleFunc("/v1/auth/challenge", s.handleChallenge)
-	finalMux.HandleFunc("/v1/auth/verify", s.handleVerify)
-	finalMux.HandleFunc("/v1/auth/totp", s.handleTOTPLogin)
-	finalMux.HandleFunc("/v1/auth/admin/login", s.handleAdminLogin)
-	finalMux.Handle("/v1/", s.auditMiddleware(requestIDMiddleware(s.authMiddleware(authed))))
-
-	return requestIDMiddleware(finalMux)
+	return requestIDMiddleware(mux)
 }
 
 func (s *Server) withAdmin(h http.HandlerFunc) http.HandlerFunc {

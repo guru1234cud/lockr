@@ -2,7 +2,6 @@ package auth
 
 import (
 	"crypto/rand"
-	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -27,6 +26,14 @@ type AdminAuth struct {
 
 func NewAdminAuth(db *storage.DB) *AdminAuth {
 	return &AdminAuth{db: db}
+}
+
+func (a *AdminAuth) HasAdmins() (bool, error) {
+	keys, err := a.db.List("auth/admins/")
+	if err != nil {
+		return false, err
+	}
+	return len(keys) > 0, nil
 }
 
 // Create generates a new admin token, stores its hash, and returns the raw token.
@@ -78,7 +85,7 @@ func (a *AdminAuth) Verify(token string) (*AdminRecord, error) {
 		if err := json.Unmarshal(data, &rec); err != nil {
 			continue
 		}
-		if subtle.ConstantTimeCompare([]byte{1}, []byte{1}) == 1 && storage.VerifyArgon2id([]byte(token), rec.Hash) {
+		if storage.VerifyArgon2id([]byte(token), rec.Hash) {
 			return &rec, nil
 		}
 	}

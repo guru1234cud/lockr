@@ -44,7 +44,7 @@ func (s *Server) handleDBPutConfig(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleDBGenCreds(w http.ResponseWriter, r *http.Request) {
 	name := dbName(r.URL.Path)
-	if !s.policy.Allowed(getPolicy(r), "secrets/db/"+name, policy.CapRead) {
+	if !s.policy.Allowed(getPolicy(r), "secrets/db/"+name, policy.CapWrite) {
 		writeErrorWithReqID(w, r, http.StatusForbidden, "permission denied")
 		return
 	}
@@ -63,6 +63,11 @@ func (s *Server) handleDBRevokeLease(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid path")
 		return
 	}
+	name := parts[0]
+	if !s.policy.Allowed(getPolicy(r), "secrets/db/"+name, policy.CapDelete) {
+		writeErrorWithReqID(w, r, http.StatusForbidden, "permission denied")
+		return
+	}
 	leaseID := parts[2]
 	if err := s.dbStore.RevokeLease(r.Context(), leaseID); err != nil {
 		writeErrorWithReqID(w, r, http.StatusNotFound, err.Error())
@@ -73,6 +78,10 @@ func (s *Server) handleDBRevokeLease(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleDBTestConfig(w http.ResponseWriter, r *http.Request) {
 	name := dbName(r.URL.Path)
+	if !s.policy.Allowed(getPolicy(r), "secrets/db/"+name, policy.CapRead) {
+		writeErrorWithReqID(w, r, http.StatusForbidden, "permission denied")
+		return
+	}
 	if err := s.dbStore.TestConnection(r.Context(), name); err != nil {
 		writeErrorWithReqID(w, r, http.StatusBadGateway, "connection failed: "+err.Error())
 		return
@@ -82,6 +91,10 @@ func (s *Server) handleDBTestConfig(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleDBListLeases(w http.ResponseWriter, r *http.Request) {
 	name := dbName(r.URL.Path)
+	if !s.policy.Allowed(getPolicy(r), "secrets/db/"+name, policy.CapList) {
+		writeErrorWithReqID(w, r, http.StatusForbidden, "permission denied")
+		return
+	}
 	leases, err := s.dbStore.ListLeases(name)
 	if err != nil {
 		writeErrorWithReqID(w, r, http.StatusInternalServerError, err.Error())

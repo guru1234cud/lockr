@@ -2,8 +2,9 @@ package auth
 
 import (
 	"crypto/rand"
-	"crypto/subtle"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,6 +21,7 @@ type SessionMeta struct {
 	Policy     string    `json:"policy"`
 	IssuedAt   time.Time `json:"issued_at"`
 	ExpiresAt  time.Time `json:"expires_at"`
+	TokenHash  []byte    `json:"token_hash"`
 }
 
 type SessionStore struct {
@@ -44,20 +46,21 @@ func (s *SessionStore) Issue(identity, authMethod, policy string) (string, error
 		return "", fmt.Errorf("hash session token: %w", err)
 	}
 
+	now := time.Now().UTC()
 	meta := SessionMeta{
 		Identity:   identity,
 		AuthMethod: authMethod,
 		Policy:     policy,
-		IssuedAt:   time.Now().UTC(),
-		ExpiresAt:  time.Now().UTC().Add(s.ttl),
+		IssuedAt:   now,
+		ExpiresAt:  now.Add(s.ttl),
+		TokenHash:  hash,
 	}
 	metaJSON, err := json.Marshal(meta)
 	if err != nil {
 		return "", err
 	}
 
-	// Store hash → metadata, keyed by hash hex
-	key := "auth/sessions/" + base64.RawURLEncoding.EncodeToString(hash)
+	key := sessionKey(token)
 	if err := s.db.SetWithTTL(key, metaJSON, s.ttl); err != nil {
 		return "", fmt.Errorf("store session: %w", err)
 	}
@@ -70,14 +73,7 @@ func (s *SessionStore) Validate(token string) (*SessionMeta, error) {
 		return nil, errors.New("invalid token format")
 	}
 
-	// Enumerate sessions and compare in constant time (hash lookup requires re-deriving the key).
-	// Since Argon2id is slow, we store the hash as the key and must scan — but session count is small.
-	// For production scale, store a fast hash index. For Lockr v1 this is acceptable.
-	hash, err := storage.HashArgon2id([]byte(token))
-	if err != nil {
-		return nil, err
-	}
-	key := "auth/sessions/" + base64.RawURLEncoding.EncodeToString(hash)
+	key := sessionKey(token)
 	data, err := s.db.Get(key)
 	if err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
@@ -85,11 +81,13 @@ func (s *SessionStore) Validate(token string) (*SessionMeta, error) {
 		}
 		return nil, err
 	}
-	_ = subtle.ConstantTimeCompare([]byte(token), []byte(token)) // ensure timing branch not optimized away
 
 	var meta SessionMeta
 	if err := json.Unmarshal(data, &meta); err != nil {
 		return nil, err
+	}
+	if !storage.VerifyArgon2id([]byte(token), meta.TokenHash) {
+		return nil, errors.New("invalid session token")
 	}
 	if time.Now().UTC().After(meta.ExpiresAt) {
 		_ = s.db.Delete(key)
@@ -100,10 +98,10 @@ func (s *SessionStore) Validate(token string) (*SessionMeta, error) {
 
 // Revoke deletes the session for the given token.
 func (s *SessionStore) Revoke(token string) error {
-	hash, err := storage.HashArgon2id([]byte(token))
-	if err != nil {
-		return err
-	}
-	key := "auth/sessions/" + base64.RawURLEncoding.EncodeToString(hash)
-	return s.db.Delete(key)
+	return s.db.Delete(sessionKey(token))
+}
+
+func sessionKey(token string) string {
+	sum := sha256.Sum256([]byte(token))
+	return "auth/sessions/" + hex.EncodeToString(sum[:])
 }

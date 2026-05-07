@@ -56,6 +56,10 @@ func (s *Server) handleTransitDecrypt(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleTransitRotate(w http.ResponseWriter, r *http.Request) {
 	keyname := transitKeyName(r.URL.Path, "/rotate")
+	if !s.policy.Allowed(getPolicy(r), "secrets/transit/"+keyname, policy.CapWrite) {
+		writeErrorWithReqID(w, r, http.StatusForbidden, "permission denied")
+		return
+	}
 	if err := s.transitStore.Rotate(keyname); err != nil {
 		writeErrorWithReqID(w, r, http.StatusInternalServerError, err.Error())
 		return
@@ -65,6 +69,10 @@ func (s *Server) handleTransitRotate(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleTransitInfo(w http.ResponseWriter, r *http.Request) {
 	keyname := transitKeyName(r.URL.Path, "/info")
+	if !s.policy.Allowed(getPolicy(r), "secrets/transit/"+keyname, policy.CapRead) {
+		writeErrorWithReqID(w, r, http.StatusForbidden, "permission denied")
+		return
+	}
 	info, err := s.transitStore.Info(keyname)
 	if err != nil {
 		writeErrorWithReqID(w, r, http.StatusNotFound, err.Error())
@@ -75,6 +83,10 @@ func (s *Server) handleTransitInfo(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleTransitCreate(w http.ResponseWriter, r *http.Request) {
 	keyname := transitKeyName(r.URL.Path, "/create")
+	if !s.policy.Allowed(getPolicy(r), "secrets/transit/"+keyname, policy.CapWrite) {
+		writeErrorWithReqID(w, r, http.StatusForbidden, "permission denied")
+		return
+	}
 	if err := s.transitStore.CreateKey(keyname); err != nil {
 		writeErrorWithReqID(w, r, http.StatusConflict, err.Error())
 		return

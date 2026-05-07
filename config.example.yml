@@ -2,7 +2,7 @@ server:
   addr: "0.0.0.0:8300"
   tls_cert: "/etc/lockr/tls/server.crt"
   tls_key: "/etc/lockr/tls/server.key"
-  tls_ca: "/etc/lockr/tls/ca.crt"       # for verifying client certs if needed
+  tls_ca: "/etc/lockr/tls/ca.crt"       # distributed to clients for server TLS verification
 
 storage:
   data_dir: "/var/lib/lockr/data"

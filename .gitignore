@@ -46,4 +46,16 @@ Thumbs.db
 # Temp
 /tmp/
 *.log
-.codex
+
+# Local AI assistant state and scratch instructions
+.codex/
+.claude/
+.cursor/
+.gemini/
+CLAUDE.local.md
+AGENTS.local.md
+GEMINI.local.md
+CURSOR.local.md
+COPILOT.local.md
+*.ai.local.md
+*.prompt.local.md
