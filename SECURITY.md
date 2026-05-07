@@ -8,7 +8,7 @@ Lockr is a secrets manager. Security issues are taken seriously.
 
 Report vulnerabilities privately by emailing:
 
-**neuxdemorphous@gmail.com**
+**guru2006may@gmail.com**
 
 Include as much of the following as you can:
 
