@@ -18,6 +18,7 @@ type Config struct {
 	Ed25519Auth  *auth.Ed25519Auth
 	TOTPAuth     *auth.TOTPAuth
 	AdminAuth    *auth.AdminAuth
+	UserAuth     *auth.UserAuth
 	KVStore      *secrets.KVStore
 	DBStore      *secrets.DBStore
 	TransitStore *secrets.TransitStore
@@ -32,6 +33,7 @@ type Server struct {
 	ed25519Auth  *auth.Ed25519Auth
 	totpAuth     *auth.TOTPAuth
 	adminAuth    *auth.AdminAuth
+	userAuth     *auth.UserAuth
 	kvStore      *secrets.KVStore
 	dbStore      *secrets.DBStore
 	transitStore *secrets.TransitStore
@@ -48,6 +50,7 @@ func New(cfg Config) *Server {
 		ed25519Auth:  cfg.Ed25519Auth,
 		totpAuth:     cfg.TOTPAuth,
 		adminAuth:    cfg.AdminAuth,
+		userAuth:     cfg.UserAuth,
 		kvStore:      cfg.KVStore,
 		dbStore:      cfg.DBStore,
 		transitStore: cfg.TransitStore,
@@ -59,4 +62,23 @@ func New(cfg Config) *Server {
 
 func (s *Server) Handler() http.Handler {
 	return s.routes()
+}
+
+func (s *Server) logAuthAttempt(r *http.Request, identity, method, status string) {
+	if s.auditLog == nil {
+		return
+	}
+	rid, _ := r.Context().Value(ctxRequestID).(string)
+	start, _ := r.Context().Value(ctxStartTime).(time.Time)
+	_ = s.auditLog.Log(audit.Entry{
+		Timestamp:  time.Now().UTC(),
+		Identity:   identity,
+		AuthMethod: method,
+		Operation:  r.Method,
+		Path:       r.URL.Path,
+		SourceIP:   r.RemoteAddr,
+		RequestID:  rid,
+		Status:     status,
+		DurationMS: time.Since(start).Milliseconds(),
+	})
 }

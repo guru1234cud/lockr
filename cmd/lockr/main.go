@@ -20,6 +20,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/etherance/lockr/internal/auth"
 	"github.com/etherance/lockr/internal/config"
 	"github.com/etherance/lockr/internal/server"
 	"github.com/etherance/lockr/internal/storage"
@@ -69,6 +70,8 @@ func main() {
 		dbCmd(),
 		debugCmd(),
 		policyCmd(),
+		userCmd(),
+		loginCmd(),
 	)
 
 	if err := root.Execute(); err != nil {
@@ -186,9 +189,58 @@ log_level: "info"
 		}
 	}
 
-	fmt.Println("\nLockr initialized. Start the server with:")
-	fmt.Println("  LOCKR_PASSPHRASE=<your-passphrase> lockr server")
+	// Bootstrap first admin token directly into the DB.
+	adminToken, err := bootstrapAdminToken(filepath.Join(dataDir, "data"))
+	if err != nil {
+		fmt.Printf("Warning: could not create bootstrap admin token: %v\n", err)
+	}
+
+	fmt.Println("\n╔══════════════════════════════════════════════╗")
+	fmt.Println("║           Lockr initialized!                 ║")
+	fmt.Println("╚══════════════════════════════════════════════╝")
+
+	if adminToken != "" {
+		fmt.Println("\nAdmin token (save this — shown only once):")
+		fmt.Printf("  %s\n", adminToken)
+	}
+
+	fmt.Println("\nCA certificate (give this to clients):")
+	fmt.Println("  /etc/lockr/tls/ca.crt")
+
+	fmt.Println("\nBuilt-in policies (ready to use, no files needed):")
+	fmt.Println("  readonly   — read + list KV secrets")
+	fmt.Println("  readwrite  — read, write, delete KV + transit encrypt/decrypt")
+	fmt.Println("  admin      — full access to all secret engines")
+
+	fmt.Println("\nStart the server:")
+	fmt.Printf("  LOCKR_PASSPHRASE='<your-passphrase>' lockr server --config %s\n", cfgPath)
+
+	fmt.Println("\nCreate a user (once server is running):")
+	fmt.Println("  lockr user create --username alice --policy readonly --token <admin-token> --ca /etc/lockr/tls/ca.crt")
+
+	fmt.Println("\nLogin as a user:")
+	fmt.Println("  lockr login --username alice --ca /etc/lockr/tls/ca.crt")
+
 	return nil
+}
+
+func bootstrapAdminToken(dataDir string) (string, error) {
+	db, err := storage.Open(storage.Options{DataDir: dataDir})
+	if err != nil {
+		return "", fmt.Errorf("open storage: %w", err)
+	}
+	defer db.Close()
+
+	adminAuth := auth.NewAdminAuth(db)
+	// Don't overwrite if already exists.
+	hasAdmins, err := adminAuth.HasAdmins()
+	if err != nil {
+		return "", err
+	}
+	if hasAdmins {
+		return "", nil
+	}
+	return adminAuth.Create("root", "root")
 }
 
 func enrollCmd() *cobra.Command {
@@ -564,6 +616,175 @@ func debugCmd() *cobra.Command {
 	}
 }
 
+func userCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "user", Short: "Manage users"}
+
+	create := &cobra.Command{
+		Use:   "create",
+		Short: "Create a user",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			username, _ := cmd.Flags().GetString("username")
+			policy, _ := cmd.Flags().GetString("policy")
+			passwordFlag, _ := cmd.Flags().GetString("password")
+			var password []byte
+			if passwordFlag != "" {
+				password = []byte(passwordFlag)
+			} else {
+				fmt.Print("Password: ")
+				var err error
+				password, err = readPassphrase()
+				if err != nil {
+					return err
+				}
+			}
+			client := newAdminClient()
+			resp, err := client.post("/v1/sys/users", map[string]string{
+				"username": username,
+				"password": string(password),
+				"policy":   policy,
+			})
+			if err != nil {
+				return err
+			}
+			printResponse(resp)
+			return nil
+		},
+	}
+	create.Flags().String("username", "", "Username")
+	create.Flags().String("policy", "", "Policy name")
+	create.Flags().String("password", "", "Password (omit to prompt)")
+	create.MarkFlagRequired("username")
+	create.MarkFlagRequired("policy")
+
+	list := &cobra.Command{
+		Use:   "list",
+		Short: "List users",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			client := newAdminClient()
+			resp, err := client.get("/v1/sys/users")
+			if err != nil {
+				return err
+			}
+			printResponse(resp)
+			return nil
+		},
+	}
+
+	del := &cobra.Command{
+		Use:   "delete",
+		Short: "Delete a user",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			username, _ := cmd.Flags().GetString("username")
+			client := newAdminClient()
+			resp, err := client.del("/v1/sys/users/" + username)
+			if err != nil {
+				return err
+			}
+			printResponse(resp)
+			return nil
+		},
+	}
+	del.Flags().String("username", "", "Username")
+	del.MarkFlagRequired("username")
+
+	setPolicy := &cobra.Command{
+		Use:   "set-policy",
+		Short: "Change a user's policy",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			username, _ := cmd.Flags().GetString("username")
+			policy, _ := cmd.Flags().GetString("policy")
+			client := newAdminClient()
+			resp, err := client.put("/v1/sys/users/"+username+"/policy", map[string]string{"policy": policy})
+			if err != nil {
+				return err
+			}
+			printResponse(resp)
+			return nil
+		},
+	}
+	setPolicy.Flags().String("username", "", "Username")
+	setPolicy.Flags().String("policy", "", "New policy name")
+	setPolicy.MarkFlagRequired("username")
+	setPolicy.MarkFlagRequired("policy")
+
+	resetPassword := &cobra.Command{
+		Use:   "reset-password",
+		Short: "Reset a user's password",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			username, _ := cmd.Flags().GetString("username")
+			passwordFlag, _ := cmd.Flags().GetString("password")
+			var password []byte
+			if passwordFlag != "" {
+				password = []byte(passwordFlag)
+			} else {
+				fmt.Print("New password: ")
+				var err error
+				password, err = readPassphrase()
+				if err != nil {
+					return err
+				}
+			}
+			client := newAdminClient()
+			resp, err := client.put("/v1/sys/users/"+username+"/password", map[string]string{"password": string(password)})
+			if err != nil {
+				return err
+			}
+			printResponse(resp)
+			return nil
+		},
+	}
+	resetPassword.Flags().String("username", "", "Username")
+	resetPassword.Flags().String("password", "", "New password (omit to prompt)")
+	resetPassword.MarkFlagRequired("username")
+
+	cmd.AddCommand(create, list, del, setPolicy, resetPassword)
+	return cmd
+}
+
+func loginCmd() *cobra.Command {
+	var username, passwordFlag string
+	cmd := &cobra.Command{
+		Use:   "login",
+		Short: "Login as a user and print the session token",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			var password []byte
+			if passwordFlag != "" {
+				password = []byte(passwordFlag)
+			} else {
+				fmt.Print("Password: ")
+				var err error
+				password, err = readPassphrase()
+				if err != nil {
+					return err
+				}
+			}
+			client := &lockrClient{addr: serverAddr, tlsConfig: buildTLSConfig()}
+			resp, err := client.post("/v1/auth/login", map[string]string{
+				"username": username,
+				"password": string(password),
+			})
+			if err != nil {
+				return err
+			}
+			if errMsg, ok := resp["error"].(string); ok {
+				return fmt.Errorf("%s", errMsg)
+			}
+			if data, ok := resp["data"].(map[string]any); ok {
+				if token, ok := data["token"].(string); ok {
+					fmt.Println(token)
+					return nil
+				}
+			}
+			printResponse(resp)
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&username, "username", "", "Username")
+	cmd.Flags().StringVar(&passwordFlag, "password", "", "Password (omit to prompt)")
+	cmd.MarkFlagRequired("username")
+	return cmd
+}
+
 func policyCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "policy reload",
@@ -613,7 +834,7 @@ func generateTLSCerts(dir string) error {
 	if err != nil {
 		return err
 	}
-	if err := writePEM(filepath.Join(dir, "ca.crt"), "CERTIFICATE", caDER); err != nil {
+	if err := writePEMWithMode(filepath.Join(dir, "ca.crt"), "CERTIFICATE", caDER, 0644); err != nil {
 		return err
 	}
 	caPrivDER, err := x509.MarshalPKCS8PrivateKey(caPriv)
@@ -658,7 +879,11 @@ func generateTLSCerts(dir string) error {
 }
 
 func writePEM(path, typ string, der []byte) error {
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
+	return writePEMWithMode(path, typ, der, 0600)
+}
+
+func writePEMWithMode(path, typ string, der []byte, mode os.FileMode) error {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
 	if err != nil {
 		return err
 	}

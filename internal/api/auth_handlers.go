@@ -50,18 +50,20 @@ func (s *Server) handleVerify(w http.ResponseWriter, r *http.Request) {
 
 	svc, err := s.ed25519Auth.Verify(challengeBytes, sigBytes)
 	if err != nil {
+		s.logAuthAttempt(r, "svc:unknown", "ed25519", "denied")
 		writeErrorWithReqID(w, r, http.StatusUnauthorized, "authentication failed")
 		return
 	}
 
-	token, err := s.sessions.Issue(svc.Name, "ed25519", svc.Policy)
+	token, err := s.sessions.Issue("svc:"+svc.Name, "ed25519", svc.Policy)
 	if err != nil {
 		writeErrorWithReqID(w, r, http.StatusInternalServerError, "could not issue session")
 		return
 	}
+	s.logAuthAttempt(r, "svc:"+svc.Name, "ed25519", "allowed")
 	writeJSON(w, r, http.StatusOK, map[string]any{
 		"token":      token,
-		"identity":   svc.Name,
+		"identity":   "svc:" + svc.Name,
 		"policy":     svc.Policy,
 		"expires_in": s.cfg.Session.TTL.Seconds(),
 	})
@@ -83,7 +85,7 @@ func (s *Server) handleTOTPLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, err := s.sessions.Issue(rec.Name, "totp", rec.Policy)
+	token, err := s.sessions.Issue("svc:"+rec.Name, "totp", rec.Policy)
 	if err != nil {
 		writeErrorWithReqID(w, r, http.StatusInternalServerError, "could not issue session")
 		return
@@ -107,6 +109,7 @@ func (s *Server) handleAdminLogin(w http.ResponseWriter, r *http.Request) {
 
 	rec, err := s.adminAuth.Verify(req.Token)
 	if err != nil {
+		s.logAuthAttempt(r, "admin:unknown", "admin_token", "denied")
 		writeErrorWithReqID(w, r, http.StatusUnauthorized, "invalid admin token")
 		return
 	}
@@ -116,6 +119,7 @@ func (s *Server) handleAdminLogin(w http.ResponseWriter, r *http.Request) {
 		writeErrorWithReqID(w, r, http.StatusInternalServerError, "could not issue session")
 		return
 	}
+	s.logAuthAttempt(r, "admin:"+rec.Name, "admin_token", "allowed")
 	writeJSON(w, r, http.StatusOK, map[string]any{
 		"token":      token,
 		"identity":   "admin:" + rec.Name,
@@ -130,6 +134,35 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 		_ = s.sessions.Revoke(token)
 	}
 	writeJSON(w, r, http.StatusOK, map[string]string{"status": "logged out"})
+}
+
+func (s *Server) handleUserLogin(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	rec, err := s.userAuth.Verify(req.Username, req.Password)
+	if err != nil {
+		s.logAuthAttempt(r, "user:"+req.Username, "password", "denied")
+		writeErrorWithReqID(w, r, http.StatusUnauthorized, "invalid credentials")
+		return
+	}
+	token, err := s.sessions.Issue("user:"+rec.Username, "password", rec.Policy)
+	if err != nil {
+		writeErrorWithReqID(w, r, http.StatusInternalServerError, "could not issue session")
+		return
+	}
+	s.logAuthAttempt(r, "user:"+rec.Username, "password", "allowed")
+	writeJSON(w, r, http.StatusOK, map[string]any{
+		"token":      token,
+		"identity":   "user:" + rec.Username,
+		"policy":     rec.Policy,
+		"expires_in": s.cfg.Session.TTL.Seconds(),
+	})
 }
 
 func (s *Server) handleWhoAmI(w http.ResponseWriter, r *http.Request) {

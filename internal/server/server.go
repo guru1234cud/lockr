@@ -87,6 +87,7 @@ func (s *Server) Run(devMode bool) error {
 	ed25519Auth := auth.NewEd25519Auth(db)
 	totpAuth := auth.NewTOTPAuth(db)
 	adminAuth := auth.NewAdminAuth(db)
+	userAuth := auth.NewUserAuth(db)
 
 	// Secret stores.
 	kvStore := secrets.NewKVStore(db, crypto)
@@ -110,6 +111,7 @@ func (s *Server) Run(devMode bool) error {
 		Ed25519Auth:  ed25519Auth,
 		TOTPAuth:     totpAuth,
 		AdminAuth:    adminAuth,
+		UserAuth:     userAuth,
 		KVStore:      kvStore,
 		DBStore:      dbStore,
 		TransitStore: transitStore,

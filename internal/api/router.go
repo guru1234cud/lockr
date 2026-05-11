@@ -74,6 +74,28 @@ func (s *Server) routes() http.Handler {
 	authed.HandleFunc("/v1/sys/admin/", s.withAdmin(s.handleAdminDelete))
 	authed.HandleFunc("/v1/sys/policy/reload", s.withAdmin(s.handlePolicyReload))
 
+	// User management (admin only).
+	authed.HandleFunc("/v1/sys/users", s.withAdmin(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodPost:
+			s.handleUserCreate(w, r)
+		case http.MethodGet:
+			s.handleUserList(w, r)
+		default:
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		}
+	}))
+	authed.HandleFunc("/v1/sys/users/", s.withAdmin(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodDelete:
+			s.handleUserDelete(w, r)
+		case http.MethodPut:
+			s.handleUserUpdate(w, r)
+		default:
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		}
+	}))
+
 	mux := http.NewServeMux()
 
 	// Unauthenticated routes — registered before the catch-all so they take priority.
@@ -82,6 +104,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("/v1/auth/verify", s.handleVerify)
 	mux.HandleFunc("/v1/auth/totp", s.handleTOTPLogin)
 	mux.HandleFunc("/v1/auth/admin/login", s.handleAdminLogin)
+	mux.HandleFunc("/v1/auth/login", s.handleUserLogin)
 
 	// All other /v1/ routes require authentication and are audited.
 	mux.Handle("/v1/", s.auditMiddleware(s.authMiddleware(authed)))

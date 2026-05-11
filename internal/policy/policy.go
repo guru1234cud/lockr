@@ -33,6 +33,34 @@ type Policy struct {
 	Rules       []Rule `yaml:"rules"`
 }
 
+// builtins are always available and can be overridden by a same-named YAML file.
+var builtins = map[string]*Policy{
+	"readonly": {
+		Name:        "readonly",
+		Description: "Read and list all KV secrets",
+		Rules: []Rule{
+			{Path: "secrets/kv/*", Capabilities: []Capability{CapRead, CapList}},
+		},
+	},
+	"readwrite": {
+		Name:        "readwrite",
+		Description: "Full access to KV secrets and transit encrypt/decrypt",
+		Rules: []Rule{
+			{Path: "secrets/kv/*", Capabilities: []Capability{CapRead, CapWrite, CapDelete, CapList}},
+			{Path: "secrets/transit/*", Capabilities: []Capability{CapEncrypt, CapDecrypt}},
+		},
+	},
+	"admin": {
+		Name:        "admin",
+		Description: "Full access to all secret engines",
+		Rules: []Rule{
+			{Path: "secrets/kv/*", Capabilities: []Capability{CapRead, CapWrite, CapDelete, CapList}},
+			{Path: "secrets/transit/*", Capabilities: []Capability{CapEncrypt, CapDecrypt}},
+			{Path: "secrets/db/*", Capabilities: []Capability{CapRead, CapWrite, CapDelete, CapList}},
+		},
+	},
+}
+
 type Engine struct {
 	mu       sync.RWMutex
 	policies map[string]*Policy
@@ -44,6 +72,11 @@ func NewEngine(dir string) *Engine {
 		policies: make(map[string]*Policy),
 		dir:      dir,
 	}
+}
+
+// Builtins returns the names of built-in policies.
+func Builtins() []string {
+	return []string{"readonly", "readwrite", "admin"}
 }
 
 // LoadAll reads all YAML policy files from the configured directory.
@@ -112,7 +145,10 @@ func (e *Engine) Allowed(policyName, path string, cap Capability) bool {
 	p, ok := e.policies[policyName]
 	e.mu.RUnlock()
 	if !ok {
-		return false
+		p, ok = builtins[policyName]
+		if !ok {
+			return false
+		}
 	}
 
 	allowed := false
