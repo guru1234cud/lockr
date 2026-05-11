@@ -18,6 +18,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/etherance/lockr/internal/auth"
@@ -758,7 +759,7 @@ func loginCmd() *cobra.Command {
 					return err
 				}
 			}
-			client := &lockrClient{addr: serverAddr, tlsConfig: buildTLSConfig()}
+			client := &lockrClient{addr: serverAddr, tlsConfig: mustBuildTLSConfig()}
 			resp, err := client.post("/v1/auth/login", map[string]string{
 				"username": username,
 				"password": string(password),
@@ -956,11 +957,11 @@ type lockrClient struct {
 }
 
 func newAdminClient() *lockrClient {
-	return &lockrClient{addr: serverAddr, token: adminToken, tlsConfig: buildTLSConfig()}
+	return &lockrClient{addr: serverAddr, token: adminToken, tlsConfig: mustBuildTLSConfig()}
 }
 
 func newServiceClient() (*lockrClient, error) {
-	client := &lockrClient{addr: serverAddr, token: adminToken, tlsConfig: buildTLSConfig()}
+	client := &lockrClient{addr: serverAddr, token: adminToken, tlsConfig: mustBuildTLSConfig()}
 	if client.token != "" {
 		return client, nil
 	}
@@ -976,19 +977,32 @@ func newServiceClient() (*lockrClient, error) {
 	return client, nil
 }
 
-func buildTLSConfig() *tls.Config {
+func buildTLSConfig() (*tls.Config, error) {
+	if !strings.HasPrefix(serverAddr, "https://") {
+		// HTTP — TLS config is unused by the transport.
+		return &tls.Config{InsecureSkipVerify: true}, nil //nolint:gosec
+	}
 	if caPath == "" {
-		fmt.Fprintln(os.Stderr, "Warning: --ca not provided; TLS certificate verification is disabled. Use --ca or LOCKR_CA in production.")
-		return &tls.Config{InsecureSkipVerify: true} //nolint:gosec
+		return nil, fmt.Errorf("--ca is required when connecting to HTTPS\n  set LOCKR_CA or pass --ca /etc/lockr/tls/ca.crt")
 	}
 	caPEM, err := os.ReadFile(caPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: could not read CA file %s (%v); TLS certificate verification is disabled.\n", caPath, err)
-		return &tls.Config{InsecureSkipVerify: true} //nolint:gosec
+		return nil, fmt.Errorf("read CA certificate %s: %w", caPath, err)
 	}
 	pool := x509.NewCertPool()
-	pool.AppendCertsFromPEM(caPEM)
-	return &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS13}
+	if !pool.AppendCertsFromPEM(caPEM) {
+		return nil, fmt.Errorf("no valid certificates found in %s", caPath)
+	}
+	return &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS13}, nil
+}
+
+func mustBuildTLSConfig() *tls.Config {
+	cfg, err := buildTLSConfig()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "Error:", err)
+		os.Exit(1)
+	}
+	return cfg
 }
 
 func (c *lockrClient) get(path string) (map[string]any, error) {

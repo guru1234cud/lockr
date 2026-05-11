@@ -2,24 +2,49 @@
 
 Policies answer one question: what is this identity allowed to do?
 
-Policies are stored as YAML files on the server filesystem. They are not stored in the client and not stored in BadgerDB.
+Policies are assigned to users and services. They define which secret paths can be accessed and with which capabilities.
 
-## Location
+---
 
-The policy directory comes from config:
+## Built-in Policies
+
+Lockr ships three built-in policies that work without any files:
+
+| Policy | Capabilities |
+|---|---|
+| `readonly` | read, list on `secrets/kv/*` |
+| `readwrite` | read, write, delete, list on `secrets/kv/*` + encrypt, decrypt on `secrets/transit/*` |
+| `admin` | full access to KV, transit, and DB secret engines |
+
+Use them directly when creating users or enrolling services:
+
+```bash
+lockr user create --username alice --policy readonly ...
+lockr enroll --service my-app --policy readwrite ...
+```
+
+No policy files needed for these.
+
+---
+
+## Custom Policy Files
+
+When built-in policies are not specific enough, write a YAML policy file.
+
+### Location
 
 ```yaml
 policy:
   dir: "/etc/lockr/policies"
 ```
 
-Every `.yaml` or `.yml` file in that directory is loaded by the server.
+Every `.yaml` or `.yml` file in that directory is loaded at startup.
 
-## Example Policy
+### Example
 
 ```yaml
-name: api-server
-description: "Policy for the main API backend service"
+name: api-backend
+description: "Policy for the main API service"
 
 rules:
   - path: "secrets/kv/prod/api/*"
@@ -28,96 +53,96 @@ rules:
   - path: "secrets/transit/payments-key"
     capabilities: [encrypt, decrypt]
 
-  - path: "secrets/db/postgres/main"
+  - path: "secrets/db/postgres-main"
     capabilities: [read]
 ```
 
-The `name` field is important. Services and sessions refer to the policy by this name.
+The `name` field is what you pass to `--policy` when creating users or enrolling services.
 
-## Capabilities
-
-Supported capabilities:
+### Capabilities
 
 ```text
-read
-write
-delete
-list
-encrypt
-decrypt
+read     — read a secret value
+write    — create or update a secret
+delete   — soft-delete a secret
+list     — list secrets at a path prefix
+encrypt  — encrypt data with a transit key
+decrypt  — decrypt data with a transit key
 ```
 
-## Path Matching
+### Path Matching
 
-Policy paths support:
+- Exact match: `secrets/transit/payments-key`
+- Trailing wildcard: `secrets/kv/prod/api/*`
 
-- exact match: `secrets/transit/payments-key`
-- one trailing wildcard: `secrets/kv/prod/api/*`
+The wildcard matches the prefix and all paths beneath it.
 
-The wildcard matches the prefix and nested paths.
+### Deny by Default
 
-## Deny by Default
+If no rule matches a request, access is denied. There is no implicit allow.
 
-If no rule matches, access is denied.
+### Explicit Deny
 
-This is the core rule:
-
-```text
-no matching allow = no access
-```
-
-## Explicit Deny
-
-Use `deny: true` to block a path even when another rule might allow it:
+Use `deny: true` to block a specific path even when a broader rule would allow it:
 
 ```yaml
 rules:
   - path: "secrets/kv/prod/*"
     capabilities: [read]
 
-  - path: "secrets/kv/prod/private/*"
+  - path: "secrets/kv/prod/internal/*"
     deny: true
 ```
 
-In the current engine, an explicit deny returns false immediately.
+An explicit deny returns false immediately — it overrides any allow rule.
+
+---
+
+## Override a Built-in Policy
+
+Create a YAML file with the same name as the built-in to override it:
+
+```yaml
+name: readonly
+description: "Custom readonly — only prod KV"
+
+rules:
+  - path: "secrets/kv/prod/*"
+    capabilities: [read, list]
+```
+
+File-loaded policies take priority over built-ins.
+
+---
 
 ## Root Policy
 
-The special policy name `root` allows everything.
+The special policy name `root` grants all capabilities on all paths. It is used in dev mode and should never be assigned to application users or services.
 
-It is used in dev mode and should be treated as highly privileged.
+---
 
 ## Reload Policies
 
-After creating or editing policy files:
+After creating or editing policy files, reload without restarting:
 
 ```bash
 lockr policy reload \
-  --addr https://localhost:8300 \
-  --ca /etc/lockr/tls/ca.crt \
-  --token <admin-token>
-```
-
-or send `SIGHUP` to the server process.
-
-## Debug Current Policy
-
-Use:
-
-```bash
-lockr debug \
-  --identity api-server \
-  --key ./certs/api-server.key \
-  --addr https://localhost:8300 \
+  --token <admin-token> \
   --ca /etc/lockr/tls/ca.crt
 ```
 
-This calls `/v1/auth/whoami` and returns the identity, auth method, and active policy.
+Or send `SIGHUP` to the server process:
+
+```bash
+sudo kill -HUP <server-pid>
+```
+
+---
 
 ## Practical Design Advice
 
-- Create one policy per service role.
-- Give only the required capabilities.
-- Avoid broad paths such as `secrets/kv/*` unless the service truly needs wide access.
-- Separate read-only services from write-capable services.
-- Avoid assigning `root` to application services.
+- Assign `readonly` to services that only fetch secrets.
+- Assign `readwrite` to services that store or rotate secrets.
+- Write custom policies when you need to restrict access to specific paths.
+- Never assign `root` or `admin` to application services.
+- Create one policy per role — multiple users and services can share the same policy name.

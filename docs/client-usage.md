@@ -6,20 +6,20 @@ Lockr can be used through:
 - The Go SDK in `pkg/client`.
 - Example clients in `examples/`.
 
+---
+
 ## CLI Global Flags
 
-Common flags:
-
 ```text
---addr      Lockr server address
---ca        CA certificate path
---token     admin token or direct bearer token
---identity  service identity for Ed25519 auth
---key       service private key path
---output    text or json
+--addr      Server address (default: https://localhost:8300)
+--ca        Path to CA certificate
+--token     Session or admin token
+--identity  Service name for Ed25519 auth
+--key       Path to service Ed25519 private key
+--output    Output format: text or json
 ```
 
-Environment variables:
+Environment variable equivalents:
 
 ```text
 LOCKR_ADDR
@@ -29,53 +29,76 @@ LOCKR_SERVICE
 LOCKR_KEY
 ```
 
-## Admin CLI Usage
+---
 
-Admin commands use `--token`:
+## User Login
+
+Users authenticate with username and password and receive a session token:
 
 ```bash
-lockr enroll \
-  --service api-server \
-  --auth ed25519 \
-  --policy api-server \
-  --output ./certs \
-  --addr https://localhost:8300 \
-  --ca /etc/lockr/tls/ca.crt \
-  --token <admin-token>
+lockr login --username alice --ca /etc/lockr/tls/ca.crt
+# prompts for password → prints lvt_ token
 ```
+
+Non-interactive (for scripts):
+
+```bash
+lockr login --username alice --password <password> --ca /etc/lockr/tls/ca.crt
+```
+
+Export the token for subsequent commands:
+
+```bash
+export LOCKR_TOKEN=lvt_...
+lockr get prod/db-password --ca /etc/lockr/tls/ca.crt
+```
+
+---
 
 ## Service CLI Usage
 
-Service commands can use Ed25519 auth:
+Services authenticate with Ed25519 keys:
 
 ```bash
 lockr get prod/api/db \
-  --identity api-server \
-  --key ./certs/api-server.key \
-  --addr https://localhost:8300 \
+  --identity my-app \
+  --key ./keys/my-app.key \
   --ca /etc/lockr/tls/ca.crt
 ```
 
-Or they can use an existing bearer/admin token:
+The CLI handles the challenge-response flow automatically. A session token is obtained and used for the request.
+
+---
+
+## Admin CLI Usage
+
+Admin operations use `--token` with an `lkat_` admin token:
 
 ```bash
-lockr get prod/api/db \
-  --token <token> \
-  --addr https://localhost:8300 \
-  --ca /etc/lockr/tls/ca.crt
+lockr user create --username alice --policy readonly \
+  --token <admin-token> --ca /etc/lockr/tls/ca.crt
+
+lockr enroll --service my-app --policy readwrite \
+  --token <admin-token> --ca /etc/lockr/tls/ca.crt
+
+lockr audit --since 24h \
+  --token <admin-token> --ca /etc/lockr/tls/ca.crt
 ```
+
+---
 
 ## JSON Output
 
 ```bash
 lockr get prod/api/db --output json \
-  --identity api-server \
-  --key ./certs/api-server.key
+  --identity my-app \
+  --key ./keys/my-app.key \
+  --ca /etc/lockr/tls/ca.crt
 ```
 
-## Go SDK
+---
 
-Basic shape:
+## Go SDK
 
 ```go
 package main
@@ -92,14 +115,14 @@ func main() {
 
 	c, err := lockr.New(lockr.Options{
 		Addr:        "https://localhost:8300",
-		PrivKeyPath: "./certs/api-server.key",
+		PrivKeyPath: "./keys/my-app.key",
 		CAPath:      "/etc/lockr/tls/ca.crt",
 	})
 	if err != nil {
 		panic(err)
 	}
 
-	if err := c.Authenticate(ctx, "api-server"); err != nil {
+	if err := c.Authenticate(ctx, "my-app"); err != nil {
 		panic(err)
 	}
 
@@ -112,14 +135,16 @@ func main() {
 }
 ```
 
-See:
+See `examples/go/main.go`, `examples/nodejs/lockr_example.js`, and `examples/python/lockr_example.py` for more.
 
-```text
-examples/go/main.go
-examples/nodejs/lockr_example.js
-examples/python/lockr_example.py
-```
+---
 
 ## TLS Note
 
-For production-style usage, always provide `--ca` or `CAPath`. The current CLI falls back to insecure verification when no CA path is provided.
+`--ca` is required when connecting to an HTTPS server. Without it, the CLI exits with an error rather than falling back to an insecure connection. Set `LOCKR_CA` to avoid passing it on every command:
+
+```bash
+export LOCKR_CA=/etc/lockr/tls/ca.crt
+```
+
+Dev mode uses plain HTTP so `--ca` is not needed.
