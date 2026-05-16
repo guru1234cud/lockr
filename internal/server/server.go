@@ -91,17 +91,7 @@ func (s *Server) Run(devMode bool) error {
 
 	// Secret stores.
 	kvStore := secrets.NewKVStore(db, crypto)
-	dbStore := secrets.NewDBStore(db, crypto)
 	transitStore := secrets.NewTransitStore(db, crypto)
-
-	// On startup, drop any orphaned Postgres users from a previous crash/downtime.
-	if !devMode {
-		go func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-			defer cancel()
-			_ = dbStore.ReconcileOrphans(ctx)
-		}()
-	}
 
 	// HTTP API.
 	apiServer := api.New(api.Config{
@@ -113,28 +103,10 @@ func (s *Server) Run(devMode bool) error {
 		AdminAuth:    adminAuth,
 		UserAuth:     userAuth,
 		KVStore:      kvStore,
-		DBStore:      dbStore,
 		TransitStore: transitStore,
 		Policy:       policyEngine,
 		AuditLog:     auditLogger,
 	})
-
-	// DB janitor goroutine.
-	if !devMode {
-		go func() {
-			interval := s.cfg.DynamicSecrets.CredentialJanitorInterval
-			if interval == 0 {
-				interval = 5 * time.Minute
-			}
-			ticker := time.NewTicker(interval)
-			defer ticker.Stop()
-			for range ticker.C {
-				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-				_ = dbStore.RunJanitor(ctx)
-				cancel()
-			}
-		}()
-	}
 
 	// TLS config.
 	var tlsCfg *tls.Config

@@ -9,7 +9,7 @@ import (
 	"github.com/etherance/lockr/internal/storage"
 )
 
-const maxVersions = 5
+const maxVersions = 10
 const softDeleteTTL = 30 * 24 * time.Hour
 
 type KVEntry struct {
@@ -124,6 +124,15 @@ func (s *KVStore) Versions(path string) ([]*KVEntry, error) {
 		versions = append(versions, entry)
 	}
 	return versions, nil
+}
+
+// Rollback promotes an old version as a new write, making it the current version.
+func (s *KVStore) Rollback(path string, version int) (*KVEntry, error) {
+	old, err := s.Get(path, version)
+	if err != nil {
+		return nil, fmt.Errorf("rollback: %w", err)
+	}
+	return s.Set(path, old.Value)
 }
 
 // List returns direct children of a path prefix.

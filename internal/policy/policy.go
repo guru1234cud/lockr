@@ -56,7 +56,6 @@ var builtins = map[string]*Policy{
 		Rules: []Rule{
 			{Path: "secrets/kv/*", Capabilities: []Capability{CapRead, CapWrite, CapDelete, CapList}},
 			{Path: "secrets/transit/*", Capabilities: []Capability{CapEncrypt, CapDecrypt}},
-			{Path: "secrets/db/*", Capabilities: []Capability{CapRead, CapWrite, CapDelete, CapList}},
 		},
 	},
 }

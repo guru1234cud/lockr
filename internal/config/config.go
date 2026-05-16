@@ -13,8 +13,7 @@ type Config struct {
 	Storage        StorageConfig        `yaml:"storage"`
 	Audit          AuditConfig          `yaml:"audit"`
 	Policy         PolicyConfig         `yaml:"policy"`
-	DynamicSecrets DynamicSecretsConfig `yaml:"dynamic_secrets"`
-	Session        SessionConfig        `yaml:"session"`
+	Session SessionConfig `yaml:"session"`
 	LogLevel       string               `yaml:"log_level"`
 }
 
@@ -36,10 +35,6 @@ type AuditConfig struct {
 
 type PolicyConfig struct {
 	Dir string `yaml:"dir"`
-}
-
-type DynamicSecretsConfig struct {
-	CredentialJanitorInterval time.Duration `yaml:"credential_janitor_interval"`
 }
 
 type SessionConfig struct {
@@ -64,9 +59,6 @@ func Defaults() *Config {
 		},
 		Policy: PolicyConfig{
 			Dir: "/etc/lockr/policies",
-		},
-		DynamicSecrets: DynamicSecretsConfig{
-			CredentialJanitorInterval: 5 * time.Minute,
 		},
 		Session: SessionConfig{
 			TTL:    1 * time.Hour,

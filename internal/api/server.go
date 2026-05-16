@@ -20,7 +20,6 @@ type Config struct {
 	AdminAuth    *auth.AdminAuth
 	UserAuth     *auth.UserAuth
 	KVStore      *secrets.KVStore
-	DBStore      *secrets.DBStore
 	TransitStore *secrets.TransitStore
 	Policy       *policy.Engine
 	AuditLog     *audit.Logger
@@ -35,7 +34,6 @@ type Server struct {
 	adminAuth    *auth.AdminAuth
 	userAuth     *auth.UserAuth
 	kvStore      *secrets.KVStore
-	dbStore      *secrets.DBStore
 	transitStore *secrets.TransitStore
 	policy       *policy.Engine
 	auditLog     *audit.Logger
@@ -52,7 +50,6 @@ func New(cfg Config) *Server {
 		adminAuth:    cfg.AdminAuth,
 		userAuth:     cfg.UserAuth,
 		kvStore:      cfg.KVStore,
-		dbStore:      cfg.DBStore,
 		transitStore: cfg.TransitStore,
 		policy:       cfg.Policy,
 		auditLog:     cfg.AuditLog,

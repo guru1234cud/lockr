@@ -13,36 +13,21 @@ func (s *Server) routes() http.Handler {
 
 	// KV secrets.
 	authed.HandleFunc("/v1/secrets/kv/", func(w http.ResponseWriter, r *http.Request) {
-		switch r.Method {
-		case http.MethodGet:
-			s.handleKVGet(w, r)
-		case http.MethodPut:
-			s.handleKVPut(w, r)
-		case http.MethodDelete:
-			s.handleKVDelete(w, r)
-		default:
-			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
-		}
-	})
-
-	// DB dynamic credentials.
-	authed.HandleFunc("/v1/secrets/db/", func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
 		switch {
-		case hasSuffix(path, "/creds") && r.Method == http.MethodPost:
-			s.handleDBGenCreds(w, r)
-		case hasSuffix(path, "/creds") && r.Method == http.MethodGet:
-			s.handleDBListLeases(w, r)
-		case hasSuffix3(path, "/creds/") && r.Method == http.MethodDelete:
-			s.handleDBRevokeLease(w, r)
-		case hasSuffix(path, "/config") && r.Method == http.MethodGet:
-			s.handleDBGetConfig(w, r)
-		case hasSuffix(path, "/config") && r.Method == http.MethodPut:
-			s.withAdmin(s.handleDBPutConfig)(w, r)
-		case hasSuffix(path, "/test") && r.Method == http.MethodPost:
-			s.handleDBTestConfig(w, r)
+		case hasSuffix(path, "/rollback") && r.Method == http.MethodPost:
+			s.handleKVRollback(w, r)
 		default:
-			writeError(w, http.StatusNotFound, "not found")
+			switch r.Method {
+			case http.MethodGet:
+				s.handleKVGet(w, r)
+			case http.MethodPut:
+				s.handleKVPut(w, r)
+			case http.MethodDelete:
+				s.handleKVDelete(w, r)
+			default:
+				writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			}
 		}
 	})
 
@@ -129,12 +114,3 @@ func hasSuffix(path, suffix string) bool {
 	return len(path) >= len(suffix) && path[len(path)-len(suffix):] == suffix
 }
 
-func hasSuffix3(path, prefix string) bool {
-	// Check if path contains /creds/ (for lease revocation).
-	for i := range path {
-		if i+len(prefix) <= len(path) && path[i:i+len(prefix)] == prefix {
-			return true
-		}
-	}
-	return false
-}

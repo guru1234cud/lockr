@@ -68,7 +68,8 @@ func main() {
 		adminCmd(),
 		auditCmd(),
 		transitCmd(),
-		dbCmd(),
+		versionsCmd(),
+		rollbackCmd(),
 		debugCmd(),
 		policyCmd(),
 		userCmd(),
@@ -379,6 +380,76 @@ func deleteCmd() *cobra.Command {
 	}
 }
 
+func versionsCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "versions <path>",
+		Short: "List all stored versions of a secret",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			client, err := newServiceClient()
+			if err != nil {
+				return err
+			}
+			resp, err := client.get("/v1/secrets/kv/" + args[0] + "/versions")
+			if err != nil {
+				return err
+			}
+			if outputFmt == "json" {
+				printResponse(resp)
+				return nil
+			}
+			data, ok := resp["data"].(map[string]any)
+			if !ok {
+				printResponse(resp)
+				return nil
+			}
+			versions, ok := data["versions"].([]any)
+			if !ok || len(versions) == 0 {
+				fmt.Println("no versions found")
+				return nil
+			}
+			fmt.Printf("%-10s %-30s\n", "VERSION", "CREATED AT")
+			fmt.Println(strings.Repeat("-", 42))
+			for _, v := range versions {
+				if vm, ok := v.(map[string]any); ok {
+					ver := vm["version"]
+					created := vm["created_at"]
+					fmt.Printf("%-10v %-30v\n", ver, created)
+				}
+			}
+			return nil
+		},
+	}
+}
+
+func rollbackCmd() *cobra.Command {
+	var toVersion int
+	cmd := &cobra.Command{
+		Use:   "rollback <path>",
+		Short: "Promote an old version as the new current version",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if toVersion < 1 {
+				return fmt.Errorf("--to must be >= 1")
+			}
+			client, err := newServiceClient()
+			if err != nil {
+				return err
+			}
+			body := map[string]any{"version": toVersion}
+			resp, err := client.post("/v1/secrets/kv/"+args[0]+"/rollback", body)
+			if err != nil {
+				return err
+			}
+			printResponse(resp)
+			return nil
+		},
+	}
+	cmd.Flags().IntVar(&toVersion, "to", 0, "Version number to roll back to")
+	_ = cmd.MarkFlagRequired("to")
+	return cmd
+}
+
 func listCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "list <path>",
@@ -558,45 +629,6 @@ func transitCmd() *cobra.Command {
 	return cmd
 }
 
-func dbCmd() *cobra.Command {
-	cmd := &cobra.Command{Use: "db", Short: "Database dynamic credentials"}
-
-	configCmd := &cobra.Command{
-		Use:   "config <name>",
-		Args:  cobra.ExactArgs(1),
-		Short: "Configure a DB dynamic credential role",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			client := newAdminClient()
-			resp, err := client.get("/v1/secrets/db/" + args[0] + "/config")
-			if err != nil {
-				return err
-			}
-			printResponse(resp)
-			return nil
-		},
-	}
-
-	credsCmd := &cobra.Command{
-		Use:   "creds <name>",
-		Args:  cobra.ExactArgs(1),
-		Short: "Request dynamic DB credentials",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			client, err := newServiceClient()
-			if err != nil {
-				return err
-			}
-			resp, err := client.post("/v1/secrets/db/"+args[0]+"/creds", nil)
-			if err != nil {
-				return err
-			}
-			printResponse(resp)
-			return nil
-		},
-	}
-
-	cmd.AddCommand(configCmd, credsCmd)
-	return cmd
-}
 
 func debugCmd() *cobra.Command {
 	return &cobra.Command{
