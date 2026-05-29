@@ -14,7 +14,6 @@ This documentation is organized by task so operators and developers can jump dir
 - [Policies](./policies.md): built-in policies, custom YAML policies, capabilities, and path matching.
 - [KV Secrets](./kv-secrets.md): write, read, list, version, and delete KV secrets.
 - [Transit Encryption](./transit-encryption.md): encrypt and decrypt data without exposing key material.
-- [Dynamic DB Credentials](./dynamic-db-credentials.md): configure and request short-lived Postgres credentials.
 - [Admin and Audit](./admin-and-audit.md): manage users, services, admin tokens, and audit logs.
 - [API Reference](./api-reference.md): HTTP routes, auth requirements, and policy checks.
 - [Client Usage](./client-usage.md): CLI, user login, service auth, Go SDK, and examples.
@@ -85,4 +84,4 @@ CA certificate:     /etc/lockr/tls/ca.crt
 - Always pass `--ca /etc/lockr/tls/ca.crt` to clients. Without it, TLS verification is disabled.
 - Back up `/var/lib/lockr/master.key.enc` and the passphrase separately — both are required to recover secrets.
 - The admin token from `lockr init` is shown once. Store it securely and rotate it after initial setup.
-- Some DB and transit routes still need stricter policy enforcement. See [Development](./development.md).
+- Transit routes still need stricter policy enforcement. See [Development](./development.md).

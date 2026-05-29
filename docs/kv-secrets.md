@@ -2,7 +2,7 @@
 
 KV secrets store JSON values at paths.
 
-The server encrypts secret records before writing them to BadgerDB. KV secrets keep up to five retained versions.
+The server encrypts secret records before writing them to BadgerDB. KV secrets keep up to ten retained versions.
 
 ## Write a Secret
 
@@ -92,6 +92,43 @@ delete on secrets/kv/prod/api/db
 
 Delete is currently a soft delete in metadata. Restore and purge APIs are not implemented.
 
+## List All Versions
+
+```bash
+lockr versions prod/api/db \
+  --identity api-server \
+  --key ./certs/api-server.key \
+  --addr https://localhost:8300 \
+  --ca /etc/lockr/tls/ca.crt
+```
+
+Output:
+
+```
+VERSION    CREATED AT
+------------------------------------------
+1          2026-05-10T09:00:00Z
+2          2026-05-16T14:30:00Z   ← current
+```
+
+## Roll Back to an Old Version
+
+Promotes an old version as a new write — it becomes the new current version. History is never deleted.
+
+```bash
+lockr rollback prod/api/db --to 1 \
+  --identity api-server \
+  --key ./certs/api-server.key \
+  --addr https://localhost:8300 \
+  --ca /etc/lockr/tls/ca.crt
+```
+
+Required policy capability:
+
+```text
+write on secrets/kv/prod/api/db
+```
+
 ## HTTP Routes
 
 ```text
@@ -100,4 +137,5 @@ PUT    /v1/secrets/kv/<path>
 DELETE /v1/secrets/kv/<path>
 GET    /v1/secrets/kv/<path>/
 GET    /v1/secrets/kv/<path>/versions
+POST   /v1/secrets/kv/<path>/rollback    body: {"version": N}
 ```

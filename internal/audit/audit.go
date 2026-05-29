@@ -23,6 +23,8 @@ type Entry struct {
 	SourceIP      string    `json:"source_ip"`
 	RequestID     string    `json:"request_id"`
 	Status        string    `json:"status"`
+	Policy        string    `json:"policy,omitempty"`
+	ErrorMessage  string    `json:"error_message,omitempty"`
 	DurationMS    int64     `json:"duration_ms"`
 }
 
@@ -57,10 +59,10 @@ func (l *Logger) Close() error {
 }
 
 func (l *Logger) Log(e Entry) error {
-	e.ID = ulid.MustNew(ulid.Timestamp(e.Timestamp), l.entropy).String()
 	if e.Timestamp.IsZero() {
 		e.Timestamp = time.Now().UTC()
 	}
+	e.ID = ulid.MustNew(ulid.Timestamp(e.Timestamp), l.entropy).String()
 
 	data, err := json.Marshal(e)
 	if err != nil {
@@ -79,10 +81,10 @@ func (l *Logger) Log(e Entry) error {
 }
 
 type QueryOptions struct {
-	Service string
-	Since   time.Duration
-	Path    string
-	Limit   int
+	Identity string
+	Since    time.Duration
+	Path     string
+	Limit    int
 }
 
 func (l *Logger) Query(opts QueryOptions) ([]Entry, error) {
@@ -102,7 +104,7 @@ func (l *Logger) Query(opts QueryOptions) ([]Entry, error) {
 		if err := json.Unmarshal(data, &e); err != nil {
 			continue
 		}
-		if opts.Service != "" && e.Identity != opts.Service {
+		if opts.Identity != "" && e.Identity != opts.Identity {
 			continue
 		}
 		if !since.IsZero() && e.Timestamp.Before(since) {

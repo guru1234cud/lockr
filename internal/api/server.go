@@ -71,7 +71,7 @@ func (s *Server) logAuthAttempt(r *http.Request, identity, method, status string
 		Timestamp:  time.Now().UTC(),
 		Identity:   identity,
 		AuthMethod: method,
-		Operation:  r.Method,
+		Operation:  semanticOperation(r.Method, r.URL.Path),
 		Path:       r.URL.Path,
 		SourceIP:   r.RemoteAddr,
 		RequestID:  rid,

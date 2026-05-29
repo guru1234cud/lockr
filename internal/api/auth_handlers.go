@@ -18,9 +18,11 @@ func (s *Server) handleChallenge(w http.ResponseWriter, r *http.Request) {
 
 	challenge, err := s.ed25519Auth.GenerateChallenge(req.Service)
 	if err != nil {
+		s.logAuthAttempt(r, "svc:"+req.Service, "ed25519", "denied")
 		writeErrorWithReqID(w, r, http.StatusNotFound, err.Error())
 		return
 	}
+	s.logAuthAttempt(r, "svc:"+req.Service, "ed25519", "challenge_issued")
 	writeJSON(w, r, http.StatusOK, map[string]string{
 		"challenge": hex.EncodeToString(challenge),
 		"service":   req.Service,
@@ -81,6 +83,7 @@ func (s *Server) handleTOTPLogin(w http.ResponseWriter, r *http.Request) {
 
 	rec, err := s.totpAuth.Verify(req.Service, req.Code)
 	if err != nil {
+		s.logAuthAttempt(r, "svc:"+req.Service, "totp", "denied")
 		writeErrorWithReqID(w, r, http.StatusUnauthorized, "invalid TOTP code")
 		return
 	}
@@ -90,9 +93,10 @@ func (s *Server) handleTOTPLogin(w http.ResponseWriter, r *http.Request) {
 		writeErrorWithReqID(w, r, http.StatusInternalServerError, "could not issue session")
 		return
 	}
+	s.logAuthAttempt(r, "svc:"+rec.Name, "totp", "allowed")
 	writeJSON(w, r, http.StatusOK, map[string]any{
 		"token":      token,
-		"identity":   rec.Name,
+		"identity":   "svc:" + rec.Name,
 		"policy":     rec.Policy,
 		"expires_in": s.cfg.Session.TTL.Seconds(),
 	})

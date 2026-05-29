@@ -8,9 +8,9 @@ Lockr is a self-hosted secrets manager written in Go. It runs as a single binary
 
 | Feature | Description |
 |---|---|
-| KV Secrets | Store and version JSON secrets at arbitrary paths |
+| KV Secrets | Store and version JSON secrets at arbitrary paths (up to 10 versions) |
+| Secret Versioning | List all versions, read any version, roll back to a previous version |
 | Transit Encryption | Encrypt/decrypt data with named AES keys (key never exposed) |
-| Dynamic DB Credentials | Short-lived Postgres users created on demand |
 | Ed25519 Auth | Challenge-response authentication for services |
 | TOTP Auth | Time-based one-time password for services |
 | User Auth | Username + password (Argon2id) for human operators |
@@ -137,7 +137,30 @@ lockr list prod/api/ --token lvt_... --ca /etc/lockr/tls/ca.crt
 lockr delete prod/api/db --token lvt_... --ca /etc/lockr/tls/ca.crt
 ```
 
-Up to 5 versions are retained per secret.
+### List all versions of a secret
+
+```bash
+lockr versions prod/api/db --token lvt_... --ca /etc/lockr/tls/ca.crt
+```
+
+Output:
+
+```
+VERSION    CREATED AT
+------------------------------------------
+1          2026-05-10T09:00:00Z
+2          2026-05-16T14:30:00Z   ← current
+```
+
+### Roll back to an old version
+
+Copies the old version as a new write — becomes the new current version, history preserved.
+
+```bash
+lockr rollback prod/api/db --to 1 --token lvt_... --ca /etc/lockr/tls/ca.crt
+```
+
+Up to 10 versions are retained per secret.
 
 ---
 
@@ -174,38 +197,6 @@ lockr transit decrypt payments-key --ciphertext "<ciphertext>" \
 
 ```bash
 lockr transit rotate payments-key --token lkat_... --ca /etc/lockr/tls/ca.crt
-```
-
----
-
-## Dynamic Database Credentials
-
-Lockr creates short-lived Postgres users on demand and cleans them up automatically.
-
-### Configure a DB connection (admin)
-
-```bash
-curl -X PUT https://localhost:8300/v1/secrets/db/prod-pg/config \
-  -H "Authorization: Bearer lkat_..." \
-  -H "Content-Type: application/json" \
-  --cacert /etc/lockr/tls/ca.crt \
-  -d '{"host":"db.example.com","port":5432,"dbname":"app","username":"lockr-admin","password":"..."}'
-```
-
-### Request temporary credentials
-
-```bash
-lockr db creds prod-pg \
-  --identity my-app --key ./keys/my-app.key --ca /etc/lockr/tls/ca.crt
-# Prints: username, password, lease_id, expires_at
-```
-
-### List active leases (admin)
-
-```bash
-curl https://localhost:8300/v1/secrets/db/prod-pg/creds \
-  -H "Authorization: Bearer lkat_..." \
-  --cacert /etc/lockr/tls/ca.crt
 ```
 
 ---
@@ -362,10 +353,11 @@ Every response is wrapped as:
 | `PUT` | `/v1/secrets/kv/<path>` | Session | Write KV secret |
 | `DELETE` | `/v1/secrets/kv/<path>` | Session | Delete KV secret |
 | `GET` | `/v1/secrets/kv/<path>/` | Session | List KV path |
+| `GET` | `/v1/secrets/kv/<path>/versions` | Session | List all versions |
+| `POST` | `/v1/secrets/kv/<path>/rollback` | Session | Roll back to a version |
 | `POST` | `/v1/secrets/transit/<key>/encrypt` | Session | Encrypt data |
 | `POST` | `/v1/secrets/transit/<key>/decrypt` | Session | Decrypt data |
 | `POST` | `/v1/secrets/transit/<key>/rotate` | Admin | Rotate key |
-| `POST` | `/v1/secrets/db/<name>/creds` | Session | Get DB credentials |
 | `GET` | `/v1/sys/status` | Admin | Server status |
 | `POST` | `/v1/sys/enroll` | Admin | Enroll service |
 | `DELETE` | `/v1/sys/revoke/<service>` | Admin | Revoke service |

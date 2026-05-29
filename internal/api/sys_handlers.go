@@ -111,9 +111,13 @@ func (s *Server) handleRevoke(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleAudit(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
+	identity := q.Get("identity")
+	if identity == "" {
+		identity = q.Get("service") // backward-compat alias
+	}
 	opts := audit.QueryOptions{
-		Service: q.Get("service"),
-		Path:    q.Get("path"),
+		Identity: identity,
+		Path:     q.Get("path"),
 	}
 	if since := q.Get("since"); since != "" {
 		// Accept Go duration strings like "24h", "1h30m".
